@@ -1,0 +1,10 @@
+{
+    "context_name": "ngxp-reveal-be",
+    "context_namespace": [
+        "eric-ngxp-midlayer-ns"
+    ],
+    "output_directory_path": "/home/alegav1/gatdbglogs",
+    "strimzi_operator_namespace": "",
+    "previous_logs": true,
+    "current_logs": true
+}
