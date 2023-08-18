@@ -1,8 +1,14 @@
-use anyhow::Result;
+use std::{
+    fs,
+    io::{BufWriter, Write},
+};
+
+use anyhow::{Ok, Result};
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
+    api::ListParams,
     config::{KubeConfigOptions, Kubeconfig},
-    Api, Client, Config,
+    Api, Client, Config, ResourceExt,
 };
 use serde::Deserialize;
 
@@ -37,9 +43,34 @@ pub async fn kubernetes_client(
         Client::try_from(k_config).expect("Expected a valid KUBECONFIG environment variable.");
 
     config_file.context_namespace.iter().for_each(|cn| {
-        let pods: Api<Pod> = Api::namespaced(client.clone(), &cn);
+        let pods: Api<Pod> = Api::namespaced(client.clone(), cn);
         vpods.push(pods);
     });
 
     Ok(vpods)
+}
+
+pub fn write_file(folder: &str, data: &[u8], filename: &str) -> Result<()> {
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(folder.to_owned() + "/" + filename)?;
+    let mut file = BufWriter::new(file);
+    file.write_all(data)?;
+    Ok(())
+}
+
+pub async fn get_pod_list(pods: Vec<Api<Pod>>) -> Result<Vec<(String, String)>> {
+    let mut plns = vec![];
+    for p in pods {
+        p.list(&ListParams::default())
+            .await?
+            .items
+            .iter()
+            .for_each(|i| {
+                let pl = (i.name_any(), i.namespace().as_ref().unwrap().to_string());
+                plns.push(pl);
+            })
+    }
+    Ok(plns)
 }

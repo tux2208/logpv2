@@ -1,7 +1,7 @@
 {
-    "context_name": "ngxp-reveal-be",
+    "context_name": "ngxp-reveal-fe-01",
     "context_namespace": [
-        "eric-ngxp-midlayer-ns"
+        "titan-ns"
     ],
     "output_directory_path": "/home/alegav1/gatdbglogs",
     "strimzi_operator_namespace": "",

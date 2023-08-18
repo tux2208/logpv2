@@ -2,9 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Command;
 use home::home_dir;
-use kube::{api::ListParams, ResourceExt};
 use logpv2::*;
-use simplelog::{info, ConfigBuilder, LevelFilter, TermLogger, TerminalMode};
+use simplelog::{info, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, __private::log::warn};
 use std::{env::current_dir, fs, path, path::Path};
 use time::macros::format_description;
 
@@ -20,7 +19,7 @@ fn folder_creation(c: ConfigFile) -> Result<Vec<String>> {
     let folder_vec = folder_vec
         .iter()
         .map(|f| {
-            if c.output_directory_path != "" {
+            if c.output_directory_path.is_empty() {
                 let p = &c
                     .output_directory_path
                     .strip_suffix(path::is_separator)
@@ -77,7 +76,7 @@ async fn main() -> Result<()> {
 
     let config_file_path = m.get_one::<String>("config").unwrap();
 
-    let config_file = read_config_file(&config_file_path)?;
+    let config_file = read_config_file(config_file_path)?;
 
     let kube_config_path = m.get_one::<String>("kube_config_path").unwrap();
 
@@ -103,28 +102,87 @@ async fn main() -> Result<()> {
         "Context NameSpace: {}.",
         &config_file.context_namespace.join(", ")
     );
-    if config_file.strimzi_operator_namespace != "" {
+    if !config_file.strimzi_operator_namespace.is_empty() {
         info!(
             "strimzi_operator_namespace: {}",
             &config_file.strimzi_operator_namespace
         )
     }
+    let mut cmdk = vec![];
+    config_file.context_namespace.iter().for_each(|cn| {
+        let mut cmd = std::process::Command::new("kubectl");
+        cmd.args([
+            "get",
+            "pod",
+            "-n",
+            cn,
+            "--context",
+            &config_file.context_name,
+            "-o",
+            "wide",
+        ]);
+        let file_name = format!("kubernetes_pods_{}.log", cn);
+        cmdk.push((cmd, file_name));
+        let mut cmd = std::process::Command::new("kubectl");
+        cmd.args([
+            "get",
+            "pod",
+            "-n",
+            cn,
+            "--context",
+            &config_file.context_name,
+            "-o",
+            "json",
+        ]);
+        let file_name = format!("kubernetes_pods_{}.json", cn);
+        cmdk.push((cmd, file_name))
+    });
 
-    for lp in pods {
-        lp.list(&ListParams::default())
-            .await?
-            .items
-            .iter()
-            .for_each(|p| {
-                println!(
-                    "Pod: {} runs: {}",
-                    p.name_any(),
-                    p.status.as_ref().unwrap().phase.as_ref().unwrap()
-                );
-            });
+    //Get list pods.
+
+    let pods_list = get_pod_list(pods).await?;
+
+    pods_list.iter().for_each(|p| {
+        let file_name = format!("{}_{}.description", p.1, p.0);
+        let mut cmd = std::process::Command::new("kubectl");
+        cmd.args([
+            "describe",
+            "pod",
+            &p.0,
+            "-n",
+            &p.1,
+            "--context",
+            &config_file.context_name,
+        ]);
+
+        cmdk.push((cmd, file_name));
+    });
+    let mut fut_handle = vec![];
+    cmdk.into_iter().for_each(|mut c| {
+        let folders = folders.clone();
+        let task = tokio::task::spawn(async move {
+            let o = c.0.output().expect("kubectlcommand failed to start");
+            if o.stderr.is_empty() {
+                match write_file(&folders[0], &o.stdout, &c.1) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
+                    Err(e) => panic!("{}", e),
+                }
+            } else {
+                warn!("{}", String::from_utf8_lossy(&o.stderr))
+            }
+        });
+        fut_handle.push(task);
+    });
+
+    for handle in fut_handle {
+        match handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{}", e)
+            }
+        }
     }
 
-    println!("{:?}", folders);
-
+    info!("<yellow>LOG collection has been completed!!</>");
     Ok(())
 }
