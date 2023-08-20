@@ -1,16 +1,15 @@
-use std::{
-    fs,
-    io::{BufWriter, Write},
-};
-
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
-    api::ListParams,
+    api::{ListParams, LogParams},
     config::{KubeConfigOptions, Kubeconfig},
     Api, Client, Config, ResourceExt,
 };
 use serde::Deserialize;
+use std::{
+    fs,
+    io::{BufWriter, Write},
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
 pub struct ConfigFile {
@@ -60,7 +59,9 @@ pub fn write_file(folder: &str, data: &[u8], filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_pod_list(pods: Vec<Api<Pod>>) -> Result<Vec<(String, String)>> {
+pub async fn get_pod_list(
+    pods: Vec<Api<Pod>>,
+) -> Result<Vec<(String, String, Api<Pod>, Vec<String>)>> {
     let mut plns = vec![];
     for p in pods {
         p.list(&ListParams::default())
@@ -68,9 +69,41 @@ pub async fn get_pod_list(pods: Vec<Api<Pod>>) -> Result<Vec<(String, String)>> 
             .items
             .iter()
             .for_each(|i| {
-                let pl = (i.name_any(), i.namespace().as_ref().unwrap().to_string());
+                let pl = (
+                    i.name_any(),
+                    i.namespace().as_ref().unwrap().to_string(),
+                    p.clone(),
+                    i.spec
+                        .as_ref()
+                        .unwrap()
+                        .containers
+                        .iter()
+                        .map(|c| c.clone().name)
+                        .collect::<Vec<String>>(),
+                );
                 plns.push(pl);
             })
     }
     Ok(plns)
+}
+
+pub async fn get_logs(
+    pname: String,
+    pcontainer: String,
+    pods: Api<Pod>,
+    previous: bool,
+) -> Result<String> {
+    let l = pods
+        .logs(
+            &pname,
+            &LogParams {
+                container: Some(pcontainer),
+                pretty: (true),
+                previous: (previous),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    Ok(l)
 }

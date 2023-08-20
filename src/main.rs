@@ -140,7 +140,12 @@ async fn main() -> Result<()> {
 
     //Get list pods.
 
-    let pods_list = get_pod_list(pods).await?;
+    let pods_list: Vec<(
+        String,
+        String,
+        kube::Api<k8s_openapi::api::core::v1::Pod>,
+        Vec<String>,
+    )> = get_pod_list(pods).await?;
 
     pods_list.iter().for_each(|p| {
         let file_name = format!("{}_{}.description", p.1, p.0);
@@ -157,11 +162,11 @@ async fn main() -> Result<()> {
 
         cmdk.push((cmd, file_name));
     });
-    let mut fut_handle = vec![];
+    let mut fut_handle: Vec<tokio::task::JoinHandle<()>> = vec![];
     cmdk.into_iter().for_each(|mut c| {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
-            let o = c.0.output().expect("kubectlcommand failed to start");
+            let o = c.0.output().expect("kubectl command failed to start");
             if o.stderr.is_empty() {
                 match write_file(&folders[0], &o.stdout, &c.1) {
                     Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
@@ -174,6 +179,55 @@ async fn main() -> Result<()> {
         fut_handle.push(task);
     });
 
+    if config_file.current_logs {
+        pods_list.clone().into_iter().for_each(|pl| {
+            let folders = folders.clone();
+            let pname = pl.0.clone();
+            let task = tokio::task::spawn(async move {
+                let l = get_logs(pl.0, pl.3[0].to_string(), pl.2, false).await;
+                match l {
+                    Ok(l) => {
+                        let filename = format!("logs_current_{}_{}.log", &pl.1, &pname);
+                        match write_file(&folders[0], l.as_bytes(), &filename) {
+                            Ok(_) => info!("File has been created {}/{}", &folders[0], filename),
+                            Err(e) => {
+                                warn!("{}", e)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("{}", e)
+                    }
+                }
+            });
+            fut_handle.push(task);
+        });
+    }
+
+    if config_file.previous_logs {
+        pods_list.clone().into_iter().for_each(|pl| {
+            let folders = folders.clone();
+            let pname = pl.0.clone();
+            let task = tokio::task::spawn(async move {
+                let l = get_logs(pl.0, pl.3[0].to_string(), pl.2, true).await;
+                match l {
+                    Ok(l) => {
+                        let filename = format!("logs_previous_{}_{}.log", &pl.1, &pname);
+                        match write_file(&folders[0], l.as_bytes(), &filename) {
+                            Ok(_) => info!("File has been created {}/{}", &folders[0], filename),
+                            Err(e) => {
+                                warn!("{}", e)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("{}", e)
+                    }
+                }
+            });
+            fut_handle.push(task);
+        });
+    }
     for handle in fut_handle {
         match handle.await {
             Ok(_) => {}
@@ -182,7 +236,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
     info!("<yellow>LOG collection has been completed!!</>");
     Ok(())
 }
