@@ -2,6 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Command;
 use home::home_dir;
+use k8s_openapi::api::core::v1::{Node, Pod};
+use kube::{api::ListParams, Api, ResourceExt};
 use logpv2::*;
 use simplelog::{info, ConfigBuilder, LevelFilter, TermLogger, TerminalMode, __private::log::warn};
 use std::{env::current_dir, fs, path, path::Path};
@@ -19,7 +21,7 @@ fn folder_creation(c: ConfigFile) -> Result<Vec<String>> {
     let folder_vec = folder_vec
         .iter()
         .map(|f| {
-            if c.output_directory_path.is_empty() {
+            if !c.output_directory_path.is_empty() {
                 let p = &c
                     .output_directory_path
                     .strip_suffix(path::is_separator)
@@ -73,14 +75,20 @@ async fn main() -> Result<()> {
                 .required(false),
         )
         .get_matches();
-
+    //Pod
     let config_file_path = m.get_one::<String>("config").unwrap();
 
     let config_file = read_config_file(config_file_path)?;
 
     let kube_config_path = m.get_one::<String>("kube_config_path").unwrap();
 
-    let pods = kubernetes_client(kube_config_path, config_file.clone()).await?;
+    let client = kubernetes_client(kube_config_path, config_file.clone()).await?;
+
+    let mut pods = vec![];
+    config_file.context_namespace.iter().for_each(|cn| {
+        let p: Api<Pod> = Api::namespaced(client.clone(), cn);
+        pods.push(p);
+    });
 
     std::process::Command::new("clear").status().unwrap();
     info!("<green>Starting Log collection...</>");
@@ -121,7 +129,7 @@ async fn main() -> Result<()> {
             "-o",
             "wide",
         ]);
-        let file_name = format!("kubernetes_pods_{}.log", cn);
+        let file_name = format!("kubernetes_pods_{}.list", cn);
         cmdk.push((cmd, file_name));
         let mut cmd = std::process::Command::new("kubectl");
         cmd.args([
@@ -167,12 +175,13 @@ async fn main() -> Result<()> {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
             let o = c.0.output().expect("kubectl command failed to start");
-            if o.stderr.is_empty() {
+            if !o.stdout.is_empty() {
                 match write_file(&folders[0], &o.stdout, &c.1) {
                     Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
                     Err(e) => panic!("{}", e),
                 }
-            } else {
+            }
+            if !o.stderr.is_empty() {
                 warn!("{}", String::from_utf8_lossy(&o.stderr))
             }
         });
@@ -228,6 +237,7 @@ async fn main() -> Result<()> {
             fut_handle.push(task);
         });
     }
+
     for handle in fut_handle {
         match handle.await {
             Ok(_) => {}
@@ -236,6 +246,103 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    // Infra
+
+    let nodes: Api<Node> = Api::all(client.clone());
+
+    let nodes_list = nodes.list(&ListParams::default()).await?;
+
+    let nodes_list = nodes_list
+        .items
+        .iter()
+        .map(|n| n.name_any())
+        .collect::<Vec<String>>();
+
+    let mut cmdki = vec![];
+    let mut fut_handle_infra = vec![];
+    let mut cmd = std::process::Command::new("kubectl");
+    cmd.args([
+        "get",
+        "nodes",
+        "--context",
+        &config_file.context_name,
+        "-o",
+        "wide",
+    ]);
+    let file_name = "kubernetes_nodes.list".to_string();
+    cmdki.push((cmd, file_name));
+
+    let mut cmd = std::process::Command::new("kubectl");
+    cmd.args([
+        "get",
+        "nodes",
+        "--context",
+        &config_file.context_name,
+        "-o",
+        "json",
+    ]);
+    let file_name = "kubernetes_nodes_list.json".to_string();
+    cmdki.push((cmd, file_name));
+
+    let mut cmd = std::process::Command::new("kubectl");
+    cmd.args([
+        "version",
+        "--context",
+        &config_file.context_name,
+        "-o",
+        "json",
+    ]);
+    let file_name = "kubernetes_version.json".to_string();
+    cmdki.push((cmd, file_name));
+
+    let mut cmd = std::process::Command::new("kubectl");
+    cmd.args(["events", "-A", "--context", &config_file.context_name]);
+    let file_name = "kubernetes_cluster.events".to_string();
+    cmdki.push((cmd, file_name));
+
+    nodes_list.iter().for_each(|n| {
+        let mut cmd = std::process::Command::new("kubectl");
+        cmd.args([
+            "describe",
+            "node",
+            n,
+            "--context",
+            &config_file.context_name,
+        ]);
+
+        let file_name = format!("{}.description", n);
+        cmdki.push((cmd, file_name));
+    });
+
+    cmdki.into_iter().for_each(|mut c| {
+        let folders = folders.clone();
+        let task = tokio::task::spawn(async move {
+            let o = c.0.output().expect("kubectl command failed to start");
+            if !o.stdout.is_empty() {
+                match write_file(&folders[1], &o.stdout, &c.1) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[1], &c.1),
+                    Err(e) => panic!("{}", e),
+                }
+            }
+            if !o.stderr.is_empty() {
+                warn!("{}", String::from_utf8_lossy(&o.stderr))
+            }
+        });
+        fut_handle_infra.push(task);
+    });
+
+    for handle in fut_handle_infra {
+        match handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{}", e)
+            }
+        }
+    }
+
+    //helm
+
     info!("<yellow>LOG collection has been completed!!</>");
     Ok(())
 }
