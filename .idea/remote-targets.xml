@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteTargetsManager">
+    <targets>
+      <target name="WSL - Ubuntu" type="wsl" uuid="3cab9a08-15d4-427d-81f1-2f337bf29743">
+        <config>
+          <option name="distributionMsId" value="Ubuntu" />
+          <option name="projectRootOnTarget" value="{exitCode=0, timeout=false, cancelled=false, stdout=/mnt/c/Program Files/JetBrains/RustRover 232.9921.62/jbr/bin&#10;, stderr=}/logpv2" />
+        </config>
+        <ContributedStateBase type="RsLanguageRuntime">
+          <config>
+            <option name="cargoPath" value="/home/alegav1/.cargo/bin/cargo" />
+            <option name="cargoVersion" value="1.71.1 (7f1d04c00 2023-07-29)" />
+            <option name="rustcPath" value="/home/alegav1/.cargo/bin/rustc" />
+            <option name="rustcVersion" value="1.71.1 (eb26296b5 2023-08-03)" />
+          </config>
+        </ContributedStateBase>
+        <ContributedStateBase type="RsLanguageRuntime">
+          <config />
+        </ContributedStateBase>
+      </target>
+    </targets>
+  </component>
+</project>

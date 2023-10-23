@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.3.21", features = ["string"] }
 tokio = { version = "1.31.0", features = ["full"] }
-kube = { version = "0.85.0", features = [ "ws", "oidc","runtime"] }
+kube = { version = "0.85.0", features = ["ws", "oidc", "runtime"] }
 k8s-openapi = { version = "0.19.0", features = ["v1_27"] }
 home = "0.5.5"
 anyhow = "1.0.72"
@@ -18,3 +18,5 @@ serde_derive = "1.0"
 chrono = "0.4.26"
 simplelog = { version = "^0.12.1", features = ["paris"] }
 time = "0.3.25"
+openssl = { version = "0.10", features = ["vendored"] }
+jq-rs = { version = "0.4.1", features = ["bundled"] }
