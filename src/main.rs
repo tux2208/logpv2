@@ -1,6 +1,8 @@
 use anyhow::Result;
 use chrono::Utc;
 use clap::Command;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use home::home_dir;
 use k8s_openapi::api::core::v1::{Node, Pod, Secret};
 use kube::{api::ListParams, Api, ResourceExt};
@@ -27,23 +29,27 @@ fn read_config_file<P: AsRef<Path>>(path: P) -> Result<ConfigFile> {
 
 fn folder_creation(c: ConfigFile) -> Result<Vec<String>> {
     let date = Utc::now().format("%Y%m%d%H%M%S");
+    let file_name_gz = format!("info_{}_{}.tar.gz", c.context_name, date);
+    let folder_to_save = if !c.output_directory_path.is_empty() {
+        c.output_directory_path
+            .strip_suffix(path::is_separator)
+            .unwrap_or(&c.output_directory_path)
+            .to_string()
+    } else {
+        current_dir().unwrap().display().to_string()
+    };
+
     let folder_vec = ["pods", "infra", "helm", "apps"];
-    let folder_vec = folder_vec
+
+    let mut folder_vec = folder_vec
         .iter()
-        .map(|f| {
-            if !c.output_directory_path.is_empty() {
-                let p = &c
-                    .output_directory_path
-                    .strip_suffix(path::is_separator)
-                    .unwrap_or(&c.output_directory_path);
-                format!("{}/info_{}_{}/{}", p, c.context_name, date, f)
-            } else {
-                let cd = current_dir().unwrap().display().to_string();
-                format!("{}/info_{}_{}/{}", cd, c.context_name, date, f)
-            }
-        })
+        .map(|f| format!("{}/info_{}_{}/{}", folder_to_save, c.context_name, date, f))
         .collect::<Vec<String>>();
 
+    let folder_src_tar = format!("{}/info_{}_{}", folder_to_save, c.context_name, date);
+    folder_vec.push(file_name_gz);
+    folder_vec.push(folder_src_tar);
+    folder_vec.push(folder_to_save);
     Ok(folder_vec)
 }
 
@@ -114,6 +120,7 @@ async fn main() -> Result<()> {
         )
         .get_matches();
     //Pod
+
     let config_file_path = m.get_one::<String>("config").unwrap();
 
     let config_file = read_config_file(config_file_path)?;
@@ -143,12 +150,14 @@ async fn main() -> Result<()> {
 
     let folders = folder_creation(config_file.clone()).unwrap();
 
-    folders.iter().for_each(|fo| match fs::create_dir_all(fo) {
-        Ok(_) => info!("Directory has been created {}.", fo),
-        Err(e) => {
-            panic!("{}", e)
-        }
-    });
+    folders.clone()[0..4]
+        .iter()
+        .for_each(|fo| match fs::create_dir_all(fo) {
+            Ok(_) => info!("Directory has been created {}.", fo),
+            Err(e) => {
+                panic!("{}", e)
+            }
+        });
     info!("Context Name: {}.", &config_file.context_name);
     info!(
         "Context NameSpace: {}.",
@@ -498,7 +507,10 @@ async fn main() -> Result<()> {
                 + " -X GET \"https://localhost:9200/_cluster/settings?pretty\"","settings"),
             ("curl -k -u elastic:".to_string()
                 + secret_user.as_str()
-                + " -X GET \"https://localhost:9200/_cluster/settings?include_defaults=true&pretty\"","defaults_settings")
+                + " -X GET \"https://localhost:9200/_cluster/settings?include_defaults=true&pretty\"","defaults_settings"),
+            ("curl -k -u elastic:".to_string()
+                + secret_user.as_str()
+                + " -X GET \"https://localhost:9200/_cat/nodes?v&pretty\"","nodes")
         ];
 
         for c in command {
@@ -553,7 +565,13 @@ async fn main() -> Result<()> {
         "".to_string(),
     )
     .await?;
+    let path = format!("{}/{}", &folders[6], &folders[4]);
+    let tar_gz = File::create(&path)?;
+    let enc = GzEncoder::new(tar_gz, Compression::default());
+    let mut tar = tar::Builder::new(enc);
 
+    tar.append_dir_all(folders[6].split('/').last().unwrap(), &folders[5])?;
+    info!("tar file has been created on {}", &path);
     info!("<yellow>LOG collection has been completed!!</>");
     Ok(())
 }
