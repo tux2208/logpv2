@@ -1,0 +1,10 @@
+{
+    "context_name": "ngxp-reveal-admin",
+    "context_namespace": [
+        "eric-ngxp-session-ns"
+    ],
+    "output_directory_path": "",
+    "previous_logs": true,
+    "current_logs": true
+}
+
