@@ -460,6 +460,7 @@ async fn main() -> Result<()> {
     //Prometheus info.
 
     //ElasticSearch
+    let mut fut_handle_es = vec![];
     let es_pods = get_pod_list(
         pods.clone(),
         "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
@@ -510,21 +511,44 @@ async fn main() -> Result<()> {
                 + " -X GET \"https://localhost:9200/_cluster/settings?include_defaults=true&pretty\"","defaults_settings"),
             ("curl -k -u elastic:".to_string()
                 + secret_user.as_str()
-                + " -X GET \"https://localhost:9200/_cat/nodes?v&pretty\"","nodes")
+                + " -X GET \"https://localhost:9200/_cat/nodes?v&pretty\"","nodes"),
+            ("curl -k -u elastic:".to_string()
+                + secret_user.as_str()
+                + " -X GET \"https://localhost:9200/_cat/_cat/shards?v\"","shards"),
+            ("curl -k -u elastic:".to_string()
+                + secret_user.as_str()
+                + " -X GET \"https://localhost:9200/_cluster/state?pretty\"","state"),
+            ("curl -k -u elastic:".to_string()
+                + secret_user.as_str()
+                + " -X GET \"https://localhost:9200/_cluster/stats?human&pretty\"","stats_human")
         ];
 
         for c in command {
-            let pod_name = &es_pods[0].0;
-            let apipod = &es_pods[0].2;
-            let container = &es_pods[0].3[0];
-            let cmd = ["/bin/sh", "-c", &c.0];
-            let filename = format!("elastic_search_{}.json", &c.1);
-            let data =
-                send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd).await?;
-            if !data.is_empty() {
-                match write_file(&folders[3], data.as_bytes(), &filename) {
-                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
-                    Err(e) => panic!("{}", e),
+            let folders = folders.clone();
+            let es_pods = es_pods.clone();
+            let task = tokio::task::spawn(async move {
+                let pod_name = &es_pods[0].0;
+                let apipod = &es_pods[0].2;
+                let container = &es_pods[0].3[0];
+                let cmd = ["/bin/sh", "-c", &c.0];
+                let filename = format!("elastic_search_{}.json", &c.1);
+                let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
+                    .await
+                    .unwrap();
+                if !data.is_empty() {
+                    match write_file(&folders[3], data.as_bytes(), &filename) {
+                        Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                        Err(e) => panic!("{}", e),
+                    }
+                }
+            });
+            fut_handle_es.push(task);
+        }
+        for handle in fut_handle_es {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
                 }
             }
         }
@@ -566,10 +590,13 @@ async fn main() -> Result<()> {
     )
     .await?;
     let path = format!("{}/{}", &folders[6], &folders[4]);
+    info!(
+        "tar file its been created and copy to the following path {}",
+        &path
+    );
     let tar_gz = File::create(&path)?;
     let enc = GzEncoder::new(tar_gz, Compression::default());
     let mut tar = tar::Builder::new(enc);
-
     tar.append_dir_all(folders[6].split('/').last().unwrap(), &folders[5])?;
     info!("tar file has been created on {}", &path);
     info!("<yellow>LOG collection has been completed!!</>");
