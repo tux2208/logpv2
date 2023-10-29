@@ -19,6 +19,7 @@ pub struct ConfigFile {
     pub output_directory_path: String,
     pub previous_logs: bool,
     pub current_logs: bool,
+    pub non_exfo_kafka_product_kubernetes_label: String,
 }
 
 pub async fn kubernetes_client(

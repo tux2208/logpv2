@@ -496,7 +496,7 @@ async fn main() -> Result<()> {
             })
         });
 
-        let command = [
+        let command_es = [
             ("curl -k -u elastic:".to_string()
                 + secret_user.as_str()
                 + " -X GET \"https://localhost:9200/_cluster/health?pretty\"", "health"),
@@ -523,7 +523,7 @@ async fn main() -> Result<()> {
                 + " -X GET \"https://localhost:9200/_cluster/stats?human&pretty\"","stats_human")
         ];
 
-        for c in command {
+        for c in command_es {
             let folders = folders.clone();
             let es_pods = es_pods.clone();
             let task = tokio::task::spawn(async move {
@@ -554,41 +554,96 @@ async fn main() -> Result<()> {
         }
     }
 
-    //Streaming Cores info
+    //Streaming Events Cores info
     let _streaming_pods = get_pod_list(
         pods.clone(),
-        "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
+        "app.kubernetes.io/name=cveshv-events-streaming-core-driver-0".to_string(),
+        "".to_string(),
+    )
+    .await?;
+    //Streaming Traces Cores info
+    let _streaming_pods = get_pod_list(
+        pods.clone(),
+        "app.kubernetes.io/name=cveshv-traces-streaming-core-driver-0".to_string(),
         "".to_string(),
     )
     .await?;
     //Hadoop hdfs info
     let _hadoop_pods = get_pod_list(
         pods.clone(),
-        "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
+        "app.kubernetes.io/component=datanode".to_string(),
         "".to_string(),
     )
     .await?;
     //Hbase info
     let _hbase_pods = get_pod_list(
         pods.clone(),
-        "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
+        "app.kubernetes.io/name=hbase".to_string(),
         "".to_string(),
     )
     .await?;
     //Kafka info
-    let _kafka_pods = get_pod_list(
+    let kafka_pods = get_pod_list(
         pods.clone(),
-        "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
+        "app.kubernetes.io/name=kafka".to_string(),
         "".to_string(),
     )
     .await?;
+
+    let mut fut_handle_kf = vec![];
+    if !kafka_pods.is_empty() {
+        let prefix = if config_file
+            .non_exfo_kafka_product_kubernetes_label
+            .is_empty()
+        {
+            "bin".to_string()
+        } else {
+            ".".to_string()
+        };
+        let command_kf = [(
+            prefix + "/kafka-topics.sh --bootstrap-server localhost:9092 --list",
+            "kafka_topics",
+        )];
+        for c in command_kf {
+            let folders = folders.clone();
+            let kafka_pods = kafka_pods.clone();
+            let task = tokio::task::spawn(async move {
+                let pod_name = &kafka_pods.first().as_ref().unwrap().0;
+                let apipod = &kafka_pods.first().as_ref().unwrap().2;
+                let container = &kafka_pods.first().as_ref().unwrap().3[0];
+                let cmd = ["/bin/sh", "-c", &c.0];
+                let filename = format!("kafka_{}.log", &c.1);
+                let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
+                    .await
+                    .unwrap();
+                if !data.is_empty() {
+                    match write_file(&folders[3], data.as_bytes(), &filename) {
+                        Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                        Err(e) => panic!("{}", e),
+                    }
+                }
+            });
+            fut_handle_kf.push(task);
+        }
+        for handle in fut_handle_kf {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
+                }
+            }
+        }
+    }
     //Prometheus info
     let _prometheus_pods = get_pod_list(
         pods.clone(),
-        "elasticsearch.k8s.elastic.co/node-master=true".to_string(),
+        "app.kubernetes.io/name=prometheus".to_string(),
         "".to_string(),
     )
     .await?;
+
+    //tar file process
+
     let path = format!("{}/{}", &folders[6], &folders[4]);
     info!(
         "tar file its been created and copy to the following path {}",
@@ -599,6 +654,8 @@ async fn main() -> Result<()> {
     let mut tar = tar::Builder::new(enc);
     tar.append_dir_all(folders[6].split('/').last().unwrap(), &folders[5])?;
     info!("tar file has been created on {}", &path);
+
+    //Finish log Collection Msg.
     info!("<yellow>LOG collection has been completed!!</>");
     Ok(())
 }

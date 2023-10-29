@@ -1,9 +1,10 @@
 {
-    "context_name": "ngxp-reveal-admin",
+    "context_name": "ngxp-reveal-fe-01",
     "context_namespace": [
-        "eric-ngxp-session-ns"
+        "eric-ngxp-midlayer-ns"
     ],
     "output_directory_path": "/home/alegav1/gatdbglogs",
-    "previous_logs": true,
-    "current_logs": true
+    "previous_logs": false,
+    "current_logs": false,
+    "non_exfo_kafka_product_kubernetes_label": ""
 }
