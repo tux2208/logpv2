@@ -535,8 +535,11 @@ async fn main() -> Result<()> {
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-                if !data.is_empty() {
-                    match write_file(&folders[3], data.as_bytes(), &filename) {
+                if !data[1].is_empty() {
+                    warn!("{}", data[1])
+                }
+                if !data[0].is_empty() {
+                    match write_file(&folders[3], data[0].as_bytes(), &filename) {
                         Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
                         Err(e) => panic!("{}", e),
                     }
@@ -585,7 +588,16 @@ async fn main() -> Result<()> {
     //Kafka info
     let kafka_pods = get_pod_list(
         pods.clone(),
-        "app.kubernetes.io/name=kafka".to_string(),
+        if config_file
+            .non_exfo_kafka_product_kubernetes_label
+            .is_empty()
+        {
+            "app.kubernetes.io/name=kafka".to_string()
+        } else {
+            config_file
+                .non_exfo_kafka_product_kubernetes_label
+                .to_owned()
+        },
         "".to_string(),
     )
     .await?;
@@ -600,10 +612,26 @@ async fn main() -> Result<()> {
         } else {
             ".".to_string()
         };
-        let command_kf = [(
-            prefix + "/kafka-topics.sh --bootstrap-server localhost:9092 --list",
-            "kafka_topics",
-        )];
+        let command_kf = [
+            (
+                prefix.to_owned() + "/kafka-topics.sh --bootstrap-server localhost:9092 --list",
+                "kafka_topics",
+            ),
+            (
+                prefix.to_owned() + "/kafka-topics.sh --bootstrap-server localhost:9092 --describe",
+                "kafka_topics_description",
+            ),
+            (
+                prefix.to_owned()
+                    + "/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list",
+                "kafka_groups_list",
+            ),
+            (
+                prefix.to_owned()
+                    + "/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | awk '/^[a-z]/ {print $1}'",
+                "kafka_brokers_list",
+            ),
+        ];
         for c in command_kf {
             let folders = folders.clone();
             let kafka_pods = kafka_pods.clone();
@@ -616,8 +644,11 @@ async fn main() -> Result<()> {
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-                if !data.is_empty() {
-                    match write_file(&folders[3], data.as_bytes(), &filename) {
+                if !data[1].is_empty() {
+                    warn!("{}", data[1])
+                }
+                if !data[0].is_empty() {
+                    match write_file(&folders[3], data[0].as_bytes(), &filename) {
                         Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
                         Err(e) => panic!("{}", e),
                     }

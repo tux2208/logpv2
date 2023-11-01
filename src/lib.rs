@@ -115,7 +115,7 @@ pub async fn send_command(
     pods: Api<Pod>,
     container: String,
     command: [&str; 3],
-) -> Result<String> {
+) -> Result<Vec<String>> {
     let ap = kube::api::AttachParams {
         container: Some(container),
         stderr: true,
@@ -126,9 +126,12 @@ pub async fn send_command(
     };
 
     let mut result: AttachedProcess = pods.exec(&pod_name, command, &ap).await?;
-    let mut result = result.stdout().unwrap();
-    let mut buf = String::new();
-    result.read_to_string(&mut buf).await.unwrap();
-    Ok(buf)
+    let mut result_stout = result.stdout().unwrap();
+    let mut result_sterr = result.stderr().unwrap();
+    let mut buf_stout = String::new();
+    result_stout.read_to_string(&mut buf_stout).await.unwrap();
+    let mut buf_sterr = String::new();
+    result_sterr.read_to_string(&mut buf_sterr).await.unwrap();
+    Ok([buf_stout, buf_sterr].to_vec())
     //end of the function.
 }
