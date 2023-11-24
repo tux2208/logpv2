@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
     let kube_config_path = home_dir().unwrap().join(".kube/config").into_os_string();
     //Clap outin
     let m = Command::new("Gather Debug Logs Tools.")
-        .version("0.1.0")
+        .version("0.1.1")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
         .arg(
@@ -608,27 +608,27 @@ async fn main() -> Result<()> {
             .non_exfo_kafka_product_kubernetes_label
             .is_empty()
         {
-            "bin".to_string()
+            "bin/".to_string()
         } else {
-            ".".to_string()
+            "".to_string()
         };
         let command_kf = [
             (
-                prefix.to_owned() + "/kafka-topics.sh --bootstrap-server localhost:9092 --list",
+                prefix.to_owned() + "kafka-topics.sh --bootstrap-server localhost:9092 --list",
                 "kafka_topics",
             ),
             (
-                prefix.to_owned() + "/kafka-topics.sh --bootstrap-server localhost:9092 --describe",
+                prefix.to_owned() + "kafka-topics.sh --bootstrap-server localhost:9092 --describe",
                 "kafka_topics_description",
             ),
             (
                 prefix.to_owned()
-                    + "/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list",
+                    + "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list",
                 "kafka_groups_list",
             ),
             (
                 prefix.to_owned()
-                    + "/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | awk '/^[a-z]/ {print $1}'",
+                    + "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | awk '/^[a-z]/ {print $1}'",
                 "kafka_brokers_list",
             ),
         ];
