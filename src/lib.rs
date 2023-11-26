@@ -1,4 +1,6 @@
+use anyhow::Error;
 use anyhow::Result;
+
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
     api::{AttachedProcess, ListParams, LogParams},
@@ -45,13 +47,18 @@ pub async fn kubernetes_client(
     Ok(client)
 }
 
-pub fn write_file(folder: &str, data: &[u8], filename: &str) -> Result<()> {
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(folder.to_owned() + "/" + filename)?;
-    let mut file = BufWriter::new(file);
-    file.write_all(data)?;
+pub fn write_file(folder: &str, data: &[u8], filename: &str, error: Error) -> Result<()> {
+    if !data.is_empty() {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(folder.to_owned() + "/" + filename)?;
+        let mut file = BufWriter::new(file);
+        file.write_all(data)?;
+    } else {
+        return Err(error);
+    }
+
     Ok(())
 }
 

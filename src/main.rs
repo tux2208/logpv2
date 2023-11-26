@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use anyhow::Result;
 use chrono::Utc;
 use clap::Command;
@@ -75,8 +76,7 @@ async fn main() -> Result<()> {
             "[year]-[month]-[day]T[hour]:[minute]:[second]Z"
         ))
         .build();
-    let now = chrono::offset::Local::now();
-    let custom_datetime_format = now.format("%Y%m%y_%H%M%S");
+    let date = Utc::now().format("%Y%m%d%H%M%S");
     CombinedLogger::init(vec![
         TermLogger::new(
             LevelFilter::Info,
@@ -87,11 +87,7 @@ async fn main() -> Result<()> {
         WriteLogger::new(
             LevelFilter::Info,
             config.clone(),
-            File::create(format!(
-                "output_logpv2_gather_tool_{}.log",
-                custom_datetime_format
-            ))
-            .unwrap(),
+            File::create(format!("output_logpv2_gather_tool_{}.log", date)).unwrap(),
         ),
     ])
     .unwrap();
@@ -219,12 +215,12 @@ async fn main() -> Result<()> {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
             let o = c.0.output().expect("kubectl command failed to start");
-            if !o.stdout.is_empty() {
-                match write_file(&folders[0], &o.stdout, &c.1) {
-                    Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
-                    Err(e) => panic!("{}", e),
-                }
+            let er = anyhow!("kubectl command empty response {:#?}", c.0);
+            match write_file(&folders[0], &o.stdout, &c.1, er) {
+                Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
+                Err(e) => panic!("{}", e),
             }
+
             if !o.stderr.is_empty() {
                 warn!("{}", String::from_utf8_lossy(&o.stderr))
             }
@@ -234,51 +230,66 @@ async fn main() -> Result<()> {
 
     if config_file.current_logs {
         pods_list.clone().into_iter().for_each(|pl| {
-            let folders = folders.clone();
-            let pname = pl.0.clone();
-            let task = tokio::task::spawn(async move {
-                let l = get_logs(pl.0, pl.3[0].to_string(), pl.2, false).await;
-                match l {
-                    Ok(l) => {
-                        let filename = format!("logs_current_{}_{}.log", &pl.1, &pname);
-                        match write_file(&folders[0], l.as_bytes(), &filename) {
-                            Ok(_) => info!("File has been created {}/{}", &folders[0], filename),
-                            Err(e) => {
-                                warn!("{}", e)
+            let container = pl.3.clone();
+            for c in container {
+                let pl = pl.clone();
+                let pname = pl.0.clone();
+                let folders = folders.clone();
+                let task = tokio::task::spawn(async move {
+                    let l = get_logs(pname, c.to_string(), pl.2, false).await;
+                    match l {
+                        Ok(l) => {
+                            let filename = format!("logs_current_{}_{}_{}.log", &pl.1, pl.0, c);
+                            let er = anyhow!("No Log found {} on container {}.", pl.0, c);
+                            match write_file(&folders[0], l.as_bytes(), &filename, er) {
+                                Ok(_) => {
+                                    info!("File has been created {}/{}", &folders[0], filename)
+                                }
+                                Err(e) => {
+                                    warn!("{}", e)
+                                }
                             }
                         }
+                        Err(e) => {
+                            warn!("{}", e)
+                        }
                     }
-                    Err(e) => {
-                        warn!("{}", e)
-                    }
-                }
-            });
-            fut_handle.push(task);
+                });
+
+                fut_handle.push(task);
+            }
         });
     }
 
     if config_file.previous_logs {
         pods_list.clone().into_iter().for_each(|pl| {
-            let folders = folders.clone();
-            let pname = pl.0.clone();
-            let task = tokio::task::spawn(async move {
-                let l = get_logs(pl.0, pl.3[0].to_string(), pl.2, true).await;
-                match l {
-                    Ok(l) => {
-                        let filename = format!("logs_previous_{}_{}.log", &pl.1, &pname);
-                        match write_file(&folders[0], l.as_bytes(), &filename) {
-                            Ok(_) => info!("File has been created {}/{}", &folders[0], filename),
-                            Err(e) => {
-                                warn!("{}", e)
+            let container = pl.3.clone();
+            for c in container {
+                let pl = pl.clone();
+                let folders = folders.clone();
+                let pname = pl.0.clone();
+                let task = tokio::task::spawn(async move {
+                    let l = get_logs(pl.0, c.to_string(), pl.2, true).await;
+                    match l {
+                        Ok(l) => {
+                            let filename = format!("logs_previous_{}_{}_{}.log", &pl.1, &pname, c);
+                            let er = anyhow!("No Log found {} on container {}.", pname, c);
+                            match write_file(&folders[0], l.as_bytes(), &filename, er) {
+                                Ok(_) => {
+                                    info!("File has been created {}/{}", &folders[0], filename)
+                                }
+                                Err(e) => {
+                                    warn!("{}", e)
+                                }
                             }
                         }
+                        Err(e) => {
+                            warn!("{}", e)
+                        }
                     }
-                    Err(e) => {
-                        warn!("{}", e)
-                    }
-                }
-            });
-            fut_handle.push(task);
+                });
+                fut_handle.push(task);
+            }
         });
     }
 
@@ -341,7 +352,13 @@ async fn main() -> Result<()> {
     cmdki.push((cmd, file_name));
 
     let mut cmd = std::process::Command::new("kubectl");
-    cmd.args(["events", "-A", "--context", &config_file.context_name]);
+    cmd.args([
+        "get",
+        "events",
+        "-A",
+        "--context",
+        &config_file.context_name,
+    ]);
     let file_name = "kubernetes_cluster.events".to_string();
     cmdki.push((cmd, file_name));
 
@@ -363,12 +380,12 @@ async fn main() -> Result<()> {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
             let o = c.0.output().expect("kubectl command failed to start");
-            if !o.stdout.is_empty() {
-                match write_file(&folders[1], &o.stdout, &c.1) {
-                    Ok(_) => info!("File has been created {}/{}", &folders[1], &c.1),
-                    Err(e) => panic!("{}", e),
-                }
+            let er = anyhow!("kubectl command empty response {:#?}", c.0);
+            match write_file(&folders[1], &o.stdout, &c.1, er) {
+                Ok(_) => info!("File has been created {}/{}", &folders[1], &c.1),
+                Err(e) => panic!("{}", e),
             }
+
             if !o.stderr.is_empty() {
                 warn!("{}", String::from_utf8_lossy(&o.stderr))
             }
@@ -431,12 +448,12 @@ async fn main() -> Result<()> {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
             let o = c.0.output().expect("helm command failed to start");
-            if !o.stdout.is_empty() {
-                match write_file(&folders[2], &o.stdout, &c.1) {
-                    Ok(_) => info!("File has been created {}/{}", &folders[2], &c.1),
-                    Err(e) => panic!("{}", e),
-                }
+            let er = anyhow!("kubectl command empty response {:#?}", c.0);
+            match write_file(&folders[2], &o.stdout, &c.1, er) {
+                Ok(_) => info!("File has been created {}/{}", &folders[2], &c.1),
+                Err(e) => panic!("{}", e),
             }
+
             if !o.stderr.is_empty() {
                 warn!("{}", String::from_utf8_lossy(&o.stderr))
             }
@@ -538,11 +555,10 @@ async fn main() -> Result<()> {
                 if !data[1].is_empty() {
                     warn!("{}", data[1])
                 }
-                if !data[0].is_empty() {
-                    match write_file(&folders[3], data[0].as_bytes(), &filename) {
-                        Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
-                        Err(e) => panic!("{}", e),
-                    }
+                let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                    Err(e) => panic!("{}", e),
                 }
             });
             fut_handle_es.push(task);
@@ -647,11 +663,10 @@ async fn main() -> Result<()> {
                 if !data[1].is_empty() {
                     warn!("{}", data[1])
                 }
-                if !data[0].is_empty() {
-                    match write_file(&folders[3], data[0].as_bytes(), &filename) {
-                        Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
-                        Err(e) => panic!("{}", e),
-                    }
+                let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                    Err(e) => panic!("{}", e),
                 }
             });
             fut_handle_kf.push(task);
