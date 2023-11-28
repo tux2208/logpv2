@@ -13,7 +13,7 @@ k8s-openapi = { version = "0.19.0", features = ["v1_27"] }
 home = "0.5.5"
 anyhow = "1.0.72"
 serde = "1.0"
-serde_json = "1.0"
+serde_json = "1.0.32"
 serde_derive = "1.0"
 chrono = "0.4.26"
 simplelog = { version = "^0.12.1", features = ["paris"] }
@@ -22,3 +22,4 @@ openssl = { version = "0.10", features = ["vendored"] }
 jq-rs = { version = "0.4.1", features = ["bundled"] }
 flate2 = "1.0.28"
 tar = "0.4.40"
+jsonxf = "1.1.1"

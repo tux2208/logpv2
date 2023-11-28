@@ -218,7 +218,7 @@ async fn main() -> Result<()> {
             let er = anyhow!("kubectl command empty response {:#?}", c.0);
             match write_file(&folders[0], &o.stdout, &c.1, er) {
                 Ok(_) => info!("File has been created {}/{}", &folders[0], &c.1),
-                Err(e) => panic!("{}", e),
+                Err(e) => warn!("{}", e),
             }
 
             if !o.stderr.is_empty() {
@@ -383,7 +383,7 @@ async fn main() -> Result<()> {
             let er = anyhow!("kubectl command empty response {:#?}", c.0);
             match write_file(&folders[1], &o.stdout, &c.1, er) {
                 Ok(_) => info!("File has been created {}/{}", &folders[1], &c.1),
-                Err(e) => panic!("{}", e),
+                Err(e) => warn!("{}", e),
             }
 
             if !o.stderr.is_empty() {
@@ -552,9 +552,7 @@ async fn main() -> Result<()> {
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-                if !data[1].is_empty() {
-                    warn!("{}", data[1])
-                }
+
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
                 match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
@@ -631,21 +629,26 @@ async fn main() -> Result<()> {
         let command_kf = [
             (
                 prefix.to_owned() + "kafka-topics.sh --bootstrap-server localhost:9092 --list",
-                "kafka_topics",
+                "topics",
             ),
             (
                 prefix.to_owned() + "kafka-topics.sh --bootstrap-server localhost:9092 --describe",
-                "kafka_topics_description",
+                "topics_description",
             ),
             (
                 prefix.to_owned()
                     + "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list",
-                "kafka_groups_list",
+                "groups_list",
             ),
             (
                 prefix.to_owned()
                     + "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | awk '/^[a-z]/ {print $1}'",
-                "kafka_brokers_list",
+                "brokers_list",
+            ),
+            (
+                prefix.to_owned()
+                    + "kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --all-groups",
+                "groups_describe",
             ),
         ];
         for c in command_kf {
@@ -660,9 +663,7 @@ async fn main() -> Result<()> {
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-                if !data[1].is_empty() {
-                    warn!("{}", data[1])
-                }
+
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
                 match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
@@ -681,13 +682,91 @@ async fn main() -> Result<()> {
         }
     }
     //Prometheus info
-    let _prometheus_pods = get_pod_list(
+    let mut fut_handle_pro = vec![];
+    let prometheus_pods = get_pod_list(
         pods.clone(),
         "app.kubernetes.io/name=prometheus".to_string(),
         "".to_string(),
     )
     .await?;
-
+    if !prometheus_pods.is_empty() {
+        let pod_name = prometheus_pods.first().as_ref().unwrap().0.as_str();
+        let mut path = ["midlayer", "session", "titan-ns"]
+            .into_iter()
+            .filter(|&i| pod_name.contains(i))
+            .collect::<Vec<&str>>();
+        if path.is_empty() {
+            path.push(&prometheus_pods.first().as_ref().unwrap().1)
+        }
+        let command_prometheus = [
+            (
+                format!(
+                    "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/rules' -O -",
+                    path[0]
+                ),
+                "rules.json",
+            ),
+            (
+                format!(
+                    "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/alerts' -O -",
+                    path[0]
+                ),
+                "alerts.json",
+            ),
+            (
+                format!(
+                    "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/targets' -O -",
+                    path[0]
+                ),
+                "targets.json",
+            ),
+            (
+                format!(
+                    "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/status/runtimeinfo' -O -",
+                    path[0]
+                ),
+                "runtime_info.json",
+            ),
+            (
+                format!(
+                    "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/status/buildinfo' -O -",
+                    path[0]
+                ),
+                "buding_info.json",
+            ),
+        ];
+        for c in command_prometheus {
+            let folders = folders.clone();
+            let prometheus_pods = prometheus_pods.clone();
+            let task = tokio::task::spawn(async move {
+                let pod_name = &prometheus_pods.first().as_ref().unwrap().0;
+                let apipod = &prometheus_pods.first().as_ref().unwrap().2;
+                let container = &prometheus_pods.first().as_ref().unwrap().3[0];
+                let namespace = &prometheus_pods.first().as_ref().unwrap().1;
+                let cmd = ["/bin/sh", "-c", &c.0];
+                let filename = format!("prometheus_{}_{}.log", namespace, &c.1);
+                let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
+                    .await
+                    .unwrap();
+                let data = jsonxf::pretty_print(&data[0]).unwrap();
+                //println!("{}", data[0]);
+                let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                match write_file(&folders[3], data.as_bytes(), &filename, er) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                    Err(e) => warn!("{}", e),
+                }
+            });
+            fut_handle_pro.push(task);
+        }
+        for handle in fut_handle_pro {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
+                }
+            }
+        }
+    }
     //tar file process
 
     let path = format!("{}/{}", &folders[6], &folders[4]);
