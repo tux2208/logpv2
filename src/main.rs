@@ -451,7 +451,7 @@ async fn main() -> Result<()> {
             let er = anyhow!("kubectl command empty response {:#?}", c.0);
             match write_file(&folders[2], &o.stdout, &c.1, er) {
                 Ok(_) => info!("File has been created {}/{}", &folders[2], &c.1),
-                Err(e) => panic!("{}", e),
+                Err(e) => warn!("{}", e),
             }
 
             if !o.stderr.is_empty() {
@@ -556,7 +556,7 @@ async fn main() -> Result<()> {
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
                 match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
-                    Err(e) => panic!("{}", e),
+                    Err(e) => warn!("{}", e),
                 }
             });
             fut_handle_es.push(task);
@@ -667,7 +667,7 @@ async fn main() -> Result<()> {
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
                 match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
-                    Err(e) => panic!("{}", e),
+                    Err(e) => warn!("{}", e),
                 }
             });
             fut_handle_kf.push(task);
