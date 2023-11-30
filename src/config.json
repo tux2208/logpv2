@@ -1,7 +1,7 @@
 {
     "context_name": "ngxp-reveal-fe-02",
     "context_namespace": [
-        "scalable-up-ns"
+        "eric-ngxp-midlayer-ns"
     ],
     "output_directory_path": "",
     "previous_logs": false,

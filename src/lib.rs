@@ -1,5 +1,7 @@
 use anyhow::Error;
+use anyhow::Ok;
 use anyhow::Result;
+use futures_util::stream::StreamExt;
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -8,11 +10,11 @@ use kube::{
     Api, Client, Config, ResourceExt,
 };
 use serde::Deserialize;
+
 use std::{
     fs,
     io::{BufWriter, Write},
 };
-use tokio::io::AsyncReadExt;
 
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
 pub struct ConfigFile {
@@ -122,23 +124,30 @@ pub async fn send_command(
     pods: Api<Pod>,
     container: String,
     command: [&str; 3],
-) -> Result<Vec<String>> {
+) -> Result<String> {
     let ap = kube::api::AttachParams {
         container: Some(container),
-        stderr: true,
-        stdin: false,
+        stderr: false,
+        stdin: true,
         stdout: true,
-        tty: false,
+        tty: true,
         ..Default::default()
     };
 
-    let mut result: AttachedProcess = pods.exec(&pod_name, command, &ap).await?;
-    let mut result_stout = result.stdout().unwrap();
-    let mut result_sterr = result.stderr().unwrap();
-    let mut buf_stout = String::new();
-    result_stout.read_to_string(&mut buf_stout).await.unwrap();
-    let mut buf_sterr = String::new();
-    result_sterr.read_to_string(&mut buf_sterr).await.unwrap();
-    Ok([buf_stout, buf_sterr].to_vec())
+    let result: AttachedProcess = pods.exec(&pod_name, command, &ap).await?;
+    let buf_std_out_err = get_output(result).await?;
+
+    Ok(buf_std_out_err)
     //end of the function.
+}
+async fn get_output(mut attached: AttachedProcess) -> Result<String> {
+    let stdout = tokio_util::io::ReaderStream::new(attached.stdout().unwrap());
+    let out = stdout
+        .filter_map(|r| async { r.ok().and_then(|v| String::from_utf8(v.to_vec()).ok()) })
+        .collect::<Vec<_>>()
+        .await
+        .join("");
+
+    attached.join().await?;
+    Ok(out)
 }

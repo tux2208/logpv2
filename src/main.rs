@@ -6,6 +6,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use home::home_dir;
 use k8s_openapi::api::core::v1::{Node, Pod, Secret};
+
 use kube::{api::ListParams, Api, ResourceExt};
 use logpv2::*;
 use serde_derive::Deserialize;
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
     let kube_config_path = home_dir().unwrap().join(".kube/config").into_os_string();
     //Clap outin
     let m = Command::new("Gather Debug Logs Tools.")
-        .version("0.1.1")
+        .version("0.1.2")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
         .arg(
@@ -554,7 +555,7 @@ async fn main() -> Result<()> {
                     .unwrap();
 
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
-                match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
+                match write_file(&folders[3], data.as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
                     Err(e) => warn!("{}", e),
                 }
@@ -571,34 +572,178 @@ async fn main() -> Result<()> {
         }
     }
 
-    //Streaming Events Cores info
-    let _streaming_pods = get_pod_list(
+    //Streaming Cores info
+    let streaming_core_pods = get_pod_list(
         pods.clone(),
-        "app.kubernetes.io/name=cveshv-events-streaming-core-driver-0".to_string(),
+        "spark-role=driver,app.kubernetes.io/component=streaming-core-consumer".to_string(),
         "".to_string(),
     )
     .await?;
-    //Streaming Traces Cores info
-    let _streaming_pods = get_pod_list(
-        pods.clone(),
-        "app.kubernetes.io/name=cveshv-traces-streaming-core-driver-0".to_string(),
-        "".to_string(),
-    )
-    .await?;
+    let mut fut_handle_sc = vec![];
+    if !streaming_core_pods.is_empty() {
+        for sc in streaming_core_pods {
+            let cmd = [
+                "/bin/sh",
+                "-c",
+                "curl -s localhost:4040/api/v1/applications | jq -r  '.[0] | .id' | tr -d '\n'",
+            ];
+
+            let application_id = send_command(sc.0.clone(), sc.2.clone(), sc.3[0].to_string(), cmd)
+                .await
+                .unwrap();
+
+            let command_sc = [
+                (
+                    format!(
+                        "curl \"localhost:4040/api/v1/applications/{}/environment\"",
+                        application_id
+                    ),
+                    "environment.json",
+                ),
+                (
+                    format!(
+                        "curl \"localhost:4040/api/v1/applications/{}/executors\"",
+                        application_id
+                    ),
+                    "executors.json",
+                ),
+                (
+                    format!(
+                        "curl \"localhost:4040/api/v1/applications/{}/streaming/statistics\"",
+                        application_id
+                    ),
+                    "streaming_statistics.json",
+                ),
+                (
+                    format!(
+                        "curl \"localhost:4040/api/v1/applications/{}/streaming/batches\"",
+                        application_id
+                    ),
+                    "streaming_batches.json",
+                ),
+            ];
+
+            for c in command_sc {
+                let folders = folders.clone();
+                let sc = sc.clone();
+                let task = tokio::task::spawn(async move {
+                    let cmd = ["/bin/sh", "-c", &c.0];
+                    let filename = format!("{}_{}", sc.0, &c.1);
+                    let data = send_command(sc.0, sc.2, sc.3[0].to_string(), cmd)
+                        .await
+                        .unwrap();
+                    let data = jsonxf::pretty_print(&data).unwrap();
+                    let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                    match write_file(&folders[3], data.as_bytes(), &filename, er) {
+                        Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                        Err(e) => warn!("{}", e),
+                    }
+                });
+                fut_handle_sc.push(task);
+            }
+        }
+        for handle in fut_handle_sc {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
+                }
+            }
+        }
+    }
+
     //Hadoop hdfs info
-    let _hadoop_pods = get_pod_list(
+    let hadoop_pods = get_pod_list(
         pods.clone(),
         "app.kubernetes.io/component=datanode".to_string(),
         "".to_string(),
     )
     .await?;
+    let mut fut_handle_hd = vec![];
+    if !hadoop_pods.is_empty() {
+        let command_hd = [
+            ("hdfs dfsadmin -report", "report_dfsadmin"),
+            ("hdfs dfsadmin -safemode get", "safe_mode"),
+            (
+                "time dd if=/dev/zero of=/dfs/test conv=fsync bs=384k count=10K",
+                "hdfs_diskwrite_perf",
+            ),
+        ];
+
+        for c in command_hd {
+            let folders = folders.clone();
+            let hadoop_pods = hadoop_pods.clone();
+            let task = tokio::task::spawn(async move {
+                let pod_name = &hadoop_pods.first().as_ref().unwrap().0;
+                let apipod = &hadoop_pods.first().as_ref().unwrap().2;
+                let container = &hadoop_pods.first().as_ref().unwrap().3[0];
+                let cmd = ["/bin/sh", "-c", &c.0];
+                let filename = format!("hadoop_{}.log", &c.1);
+                let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
+                    .await
+                    .unwrap();
+                let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                match write_file(&folders[3], data.as_bytes(), &filename, er) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                    Err(e) => warn!("{}", e),
+                }
+            });
+            fut_handle_hd.push(task);
+        }
+        for handle in fut_handle_hd {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
+                }
+            }
+        }
+    }
     //Hbase info
-    let _hbase_pods = get_pod_list(
+    let hbase_pods = get_pod_list(
         pods.clone(),
-        "app.kubernetes.io/name=hbase".to_string(),
+        "app.kubernetes.io/name=hbase, app.kubernetes.io/component=master".to_string(),
         "".to_string(),
     )
     .await?;
+
+    let mut fut_handle_hb = vec![];
+    if !hbase_pods.is_empty() {
+        let command_hb = [(
+            "echo \"status 'detailed'\" | hbase shell",
+            "status_detailed",
+        )];
+
+        for c in command_hb {
+            let folders = folders.clone();
+            let hbase_pods = hbase_pods.clone();
+            let task = tokio::task::spawn(async move {
+                let pod_name = &hbase_pods.first().as_ref().unwrap().0;
+                let apipod = &hbase_pods.first().as_ref().unwrap().2;
+                let container = &hbase_pods.first().as_ref().unwrap().3[0];
+                let cmd = ["/bin/sh", "-c", &c.0];
+                let filename = format!("hbase_{}.log", &c.1);
+                let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
+                    .await
+                    .unwrap();
+                let er = anyhow!("kubectl command empty response {:#?}", c.0);
+                match write_file(&folders[3], data.as_bytes(), &filename, er) {
+                    Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
+                    Err(e) => warn!("{}", e),
+                }
+            });
+            fut_handle_hb.push(task);
+        }
+        for handle in fut_handle_hb {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("{}", e)
+                }
+            }
+        }
+    }
+
     //Kafka info
     let kafka_pods = get_pod_list(
         pods.clone(),
@@ -663,9 +808,8 @@ async fn main() -> Result<()> {
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
-                match write_file(&folders[3], data[0].as_bytes(), &filename, er) {
+                match write_file(&folders[3], data.as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
                     Err(e) => warn!("{}", e),
                 }
@@ -744,12 +888,12 @@ async fn main() -> Result<()> {
                 let container = &prometheus_pods.first().as_ref().unwrap().3[0];
                 let namespace = &prometheus_pods.first().as_ref().unwrap().1;
                 let cmd = ["/bin/sh", "-c", &c.0];
-                let filename = format!("prometheus_{}_{}.log", namespace, &c.1);
+                let filename = format!("prometheus_{}_{}", namespace, &c.1);
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)
                     .await
                     .unwrap();
-                let data = jsonxf::pretty_print(&data[0]).unwrap();
-                //println!("{}", data[0]);
+
+                let data = jsonxf::pretty_print(&data).unwrap();
                 let er = anyhow!("kubectl command empty response {:#?}", c.0);
                 match write_file(&folders[3], data.as_bytes(), &filename, er) {
                     Ok(_) => info!("File has been created {}/{}", &folders[3], &filename),
