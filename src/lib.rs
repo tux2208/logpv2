@@ -1,7 +1,6 @@
 use anyhow::Error;
 use anyhow::Ok;
 use anyhow::Result;
-use futures_util::stream::StreamExt;
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::{
@@ -10,6 +9,7 @@ use kube::{
     Api, Client, Config, ResourceExt,
 };
 use serde::Deserialize;
+use tokio::io::AsyncReadExt;
 
 use std::{
     fs,
@@ -141,13 +141,8 @@ pub async fn send_command(
     //end of the function.
 }
 async fn get_output(mut attached: AttachedProcess) -> Result<String> {
-    let stdout = tokio_util::io::ReaderStream::new(attached.stdout().unwrap());
-    let out = stdout
-        .filter_map(|r| async { r.ok().and_then(|v| String::from_utf8(v.to_vec()).ok()) })
-        .collect::<Vec<_>>()
-        .await
-        .join("");
-
-    attached.join().await?;
-    Ok(out)
+    let mut result_stout = attached.stdout().unwrap();
+    let mut buf_stout = String::new();
+    result_stout.read_to_string(&mut buf_stout).await?;
+    Ok(buf_stout)
 }

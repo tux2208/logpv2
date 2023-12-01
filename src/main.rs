@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     let kube_config_path = home_dir().unwrap().join(".kube/config").into_os_string();
     //Clap outin
     let m = Command::new("Gather Debug Logs Tools.")
-        .version("0.1.2")
+        .version("1.0.3")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
         .arg(
@@ -211,7 +211,7 @@ async fn main() -> Result<()> {
 
         cmdk.push((cmd, file_name));
     });
-    let mut fut_handle: Vec<tokio::task::JoinHandle<()>> = vec![];
+    let mut fut_handle_kb: Vec<tokio::task::JoinHandle<()>> = vec![];
     cmdk.into_iter().for_each(|mut c| {
         let folders = folders.clone();
         let task = tokio::task::spawn(async move {
@@ -226,9 +226,18 @@ async fn main() -> Result<()> {
                 warn!("{}", String::from_utf8_lossy(&o.stderr))
             }
         });
-        fut_handle.push(task);
+        fut_handle_kb.push(task);
     });
 
+    for handle in fut_handle_kb {
+        match handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{}", e)
+            }
+        }
+    }
+    let mut fut_handle_lc: Vec<tokio::task::JoinHandle<()>> = vec![];
     if config_file.current_logs {
         pods_list.clone().into_iter().for_each(|pl| {
             let container = pl.3.clone();
@@ -257,11 +266,19 @@ async fn main() -> Result<()> {
                     }
                 });
 
-                fut_handle.push(task);
+                fut_handle_lc.push(task);
             }
         });
     }
-
+    for handle in fut_handle_lc {
+        match handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("{}", e)
+            }
+        }
+    }
+    let mut fut_handle_lp: Vec<tokio::task::JoinHandle<()>> = vec![];
     if config_file.previous_logs {
         pods_list.clone().into_iter().for_each(|pl| {
             let container = pl.3.clone();
@@ -289,12 +306,12 @@ async fn main() -> Result<()> {
                         }
                     }
                 });
-                fut_handle.push(task);
+                fut_handle_lp.push(task);
             }
         });
     }
 
-    for handle in fut_handle {
+    for handle in fut_handle_lp {
         match handle.await {
             Ok(_) => {}
             Err(e) => {
@@ -876,7 +893,7 @@ async fn main() -> Result<()> {
                     "wget -q 'http://127.0.0.1:9090/{}/prometheus/api/v1/status/buildinfo' -O -",
                     path[0]
                 ),
-                "buding_info.json",
+                "build_info.json",
             ),
         ];
         for c in command_prometheus {
