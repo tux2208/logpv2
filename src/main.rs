@@ -88,13 +88,13 @@ async fn main() -> Result<()> {
         WriteLogger::new(
             LevelFilter::Info,
             config.clone(),
-            File::create(format!("output_logpv2_gather_tool_{}.log", date)).unwrap(),
+            File::create(format!("output_antlog_gather_tool_{}.log", date)).unwrap(),
         ),
     ])
     .unwrap();
     let kube_config_path = home_dir().unwrap().join(".kube/config").into_os_string();
     //Clap outin
-    let m = Command::new("Gather Debug Logs Tools.")
+    let m = Command::new("Antlog its a Gather Debug Logs Tools.")
         .version("1.0.3")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
