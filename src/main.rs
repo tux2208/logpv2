@@ -762,32 +762,28 @@ async fn main() -> Result<()> {
     }
 
     //Kafka info
-    let kafka_pods = get_pod_list(
-        pods.clone(),
-        if config_file
-            .non_exfo_kafka_product_kubernetes_label
-            .is_empty()
-        {
-            "app.kubernetes.io/name=kafka".to_string()
-        } else {
-            config_file
-                .non_exfo_kafka_product_kubernetes_label
-                .to_owned()
-        },
-        "".to_string(),
-    )
-    .await?;
+    let label_k = [
+        "app.kubernetes.io/name=kafka",
+        "app.kubernetes.io/name=eric-data-message-bus-kf",
+    ];
+    let mut kafka_pods = vec![];
+    let mut p = "";
+    for k in label_k {
+        let kf = get_pod_list(pods.clone(), k.to_string(), "".to_string()).await?;
+        if !kf.is_empty() {
+            kafka_pods.push(kf);
+            p = k;
+        }
+    }
 
     let mut fut_handle_kf = vec![];
-    if !kafka_pods.is_empty() {
-        let prefix = if config_file
-            .non_exfo_kafka_product_kubernetes_label
-            .is_empty()
-        {
-            "bin/".to_string()
-        } else {
-            "".to_string()
+    if !kafka_pods[0].is_empty() {
+        let prefix = match p {
+            "app.kubernetes.io/name=kafka" => "bin/",
+            "app.kubernetes.io/name=eric-data-message-bus-kf" => "",
+            _ => "",
         };
+
         let command_kf = [
             (
                 prefix.to_owned() + "kafka-topics.sh --bootstrap-server localhost:9092 --list",
@@ -817,9 +813,9 @@ async fn main() -> Result<()> {
             let folders = folders.clone();
             let kafka_pods = kafka_pods.clone();
             let task = tokio::task::spawn(async move {
-                let pod_name = &kafka_pods.first().as_ref().unwrap().0;
-                let apipod = &kafka_pods.first().as_ref().unwrap().2;
-                let container = &kafka_pods.first().as_ref().unwrap().3[0];
+                let pod_name = &kafka_pods[0].first().as_ref().unwrap().0;
+                let apipod = &kafka_pods[0].first().as_ref().unwrap().2;
+                let container = &kafka_pods[0].first().as_ref().unwrap().3[0];
                 let cmd = ["/bin/sh", "-c", &c.0];
                 let filename = format!("kafka_{}.log", &c.1);
                 let data = send_command(pod_name.clone(), apipod.clone(), container.clone(), cmd)

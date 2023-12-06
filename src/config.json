@@ -5,6 +5,5 @@
     ],
     "output_directory_path": "",
     "previous_logs": true,
-    "current_logs": true,
-    "non_exfo_kafka_product_kubernetes_label": ""
+    "current_logs": true
 }
