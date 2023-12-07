@@ -94,18 +94,15 @@ async fn main() -> Result<()> {
     .unwrap();
     let kube_config_path = home_dir().unwrap().join(".kube/config").into_os_string();
     //Clap outin
+    let value_name = clap::Arg::new("config")
+        .short('c')
+        .long("config")
+        .value_name("CONFIG_FILE_PATH");
     let m = Command::new("Antlog its a Gather Debug Logs Tools.")
-        .version("1.0.3")
+        .version("1.0.4")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
-        .arg(
-            clap::Arg::new("config")
-                .short('c')
-                .long("config")
-                .value_name("CONFIG_FILE_PATH")
-                .help("Config File Path")
-                .required(true),
-        )
+        .arg(value_name.help("Config File Path").required(true))
         .arg(
             clap::Arg::new("kube_config_path")
                 .short('k')
@@ -928,16 +925,41 @@ async fn main() -> Result<()> {
 
     let path = format!("{}/{}", &folders[6], &folders[4]);
     info!(
-        "tar file its been created and copy to the following path {}",
+        "tar file is being created and then then it will be copied to the following path ...{}",
         &path
     );
+    info!("<yellow>this action will take few minutes...</>");
     let tar_gz = File::create(&path)?;
     let enc = GzEncoder::new(tar_gz, Compression::default());
     let mut tar = tar::Builder::new(enc);
     tar.append_dir_all(folders[6].split('/').last().unwrap(), &folders[5])?;
-    info!("tar file has been created on {}", &path);
+    info!("tar file has been created on ... {}", &path);
 
     //Finish log Collection Msg.
-    info!("<yellow>LOG collection has been completed!!</>");
+    info!("<green>LOG collection has been completed!!</>");
+    info!("<yellow>Starting Cleaning Phase!!</>");
+
+    let antlog = format!("output_antlog_gather_tool_{}.log", date);
+    let mut log_antlog = File::open(format!("output_antlog_gather_tool_{}.log", date)).unwrap();
+
+    match tar.append_file(&antlog, &mut log_antlog) {
+        Ok(_) => info!(
+            "output_antlog_gather_tool_{}.log has been add it to the tar file.",
+            date
+        ),
+        Err(e) => warn!("{}", e),
+    }
+
+    match tar.finish() {
+        Ok(_) => info!("tar file {} integrity its OK", path),
+        Err(e) => warn!("{}", e),
+    }
+
+    match fs::remove_dir_all(&folders[5]) {
+        Ok(_) => info!("Folder has been remove {}", folders[5]),
+        Err(e) => warn!("{}", e),
+    }
+    info!("<yellow>Finishing Cleaning Phase!!</>");
+    info!("<green>END!!</>");
     Ok(())
 }

@@ -4,6 +4,6 @@
         "eric-ngxp-midlayer-ns"
     ],
     "output_directory_path": "",
-    "previous_logs": true,
-    "current_logs": true
+    "previous_logs": false,
+    "current_logs": false
 }
