@@ -15,6 +15,9 @@ use simplelog::{
     info, ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
     WriteLogger, __private::log::warn,
 };
+
+use std::time::Duration;
+
 use std::{
     env::current_dir,
     fs::{self, File},
@@ -23,6 +26,7 @@ use std::{
 };
 use time::macros::format_description;
 
+use indicatif::{ProgressBar, ProgressStyle};
 fn read_config_file<P: AsRef<Path>>(path: P) -> Result<ConfigFile> {
     let content = fs::read_to_string(path)?;
     let config_file: ConfigFile = serde_json::from_str(&content)?;
@@ -99,7 +103,7 @@ async fn main() -> Result<()> {
         .long("config")
         .value_name("CONFIG_FILE_PATH");
     let m = Command::new("Antlog its a Gather Debug Logs Tools.")
-        .version("1.0.4")
+        .version("1.0.5")
         .author("tuxedo <wtuxedo@proton.me>")
         .about("Gather useful information for debugging issues raised by the support team.")
         .arg(value_name.help("Config File Path").required(true))
@@ -772,9 +776,8 @@ async fn main() -> Result<()> {
             p = k;
         }
     }
-
     let mut fut_handle_kf = vec![];
-    if !kafka_pods[0].is_empty() {
+    if !kafka_pods.is_empty() {
         let prefix = match p {
             "app.kubernetes.io/name=kafka" => "bin/",
             "app.kubernetes.io/name=eric-data-message-bus-kf" => "",
@@ -928,16 +931,25 @@ async fn main() -> Result<()> {
         "tar file is being created and then then it will be copied to the following path ...{}",
         &path
     );
-    info!("<yellow>this action will take few minutes...</>");
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+            .template("[{elapsed_precise}] {spinner:.yellow} {msg:.yellow}")?,
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100)); // Update every 100ms
+    spinner.set_message("this action will take a few minutes...");
+
     let tar_gz = File::create(&path)?;
     let enc = GzEncoder::new(tar_gz, Compression::default());
     let mut tar = tar::Builder::new(enc);
     tar.append_dir_all(folders[6].split('/').last().unwrap(), &folders[5])?;
+
+    spinner.finish_and_clear();
     info!("tar file has been created on ... {}", &path);
 
     //Finish log Collection Msg.
     info!("<green>LOG collection has been completed!!</>");
-    info!("<yellow>Starting Cleaning Phase!!</>");
 
     let antlog = format!("output_antlog_gather_tool_{}.log", date);
     let mut log_antlog = File::open(format!("output_antlog_gather_tool_{}.log", date)).unwrap();
@@ -949,8 +961,8 @@ async fn main() -> Result<()> {
         ),
         Err(e) => warn!("{}", e),
     }
-
-    match tar.finish() {
+    info!("<yellow>Starting Cleaning Phase!!</>");
+    match tar.into_inner() {
         Ok(_) => info!("tar file {} integrity its OK", path),
         Err(e) => warn!("{}", e),
     }
